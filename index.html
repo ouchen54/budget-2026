@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<meta name="description" content="Gestion simple de votre budget">
+<link rel="manifest" href="manifest.json">
+<title>Mon Budget</title>
+<style>
+:root{--primary:#2563eb;--income:#16a34a;--expense:#dc2626;--bg:#f8fafc;--card:#fff;--text:#1e293b}
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,sans-serif}
+body{background:var(--bg);color:var(--text);padding:15px;max-width:800px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;background:var(--card);padding:12px 15px;border-radius:12px;box-shadow:0 1px 3px #0001}
+.nav-btn{background:var(--primary);color:#fff;border:none;padding:8px 14px;border-radius:6px;cursor:pointer;font-weight:bold}
+.summary-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:15px}
+.card{background:var(--card);padding:10px;border-radius:10px;box-shadow:0 1px 3px #0001;text-align:center}
+.card h3{font-size:.75rem;color:#64748b;margin-bottom:4px}.card .amount{font-size:1.1rem;font-weight:bold}
+.income{color:var(--income)}.expense{color:var(--expense)}.balance{color:var(--primary)}
+.calendar-days-header{display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-weight:bold;color:#64748b;margin-bottom:5px;font-size:.85rem}
+.calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.day-cell{background:var(--card);min-height:70px;border-radius:8px;padding:4px;cursor:pointer;border:1px solid #cbd5e1;display:flex;flex-direction:column;justify-content:space-between}
+.day-cell.empty{background:transparent;border:none;cursor:default}.day-number{font-weight:bold;font-size:.85rem}
+.day-summary{font-size:.7rem;display:flex;flex-direction:column;gap:1px}.day-net{font-weight:bold;border-top:1px dashed #cbd5e1;padding-top:1px;margin-top:1px}
+.modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#0008;justify-content:center;align-items:center;z-index:1000}
+.modal-content{background:var(--card);padding:20px;border-radius:12px;width:90%;max-width:400px}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px}.close-btn{background:none;border:none;font-size:1.5rem;cursor:pointer}
+form{display:flex;flex-direction:column;gap:10px;margin-bottom:15px}form input,form select,form button{padding:10px;border:1px solid #cbd5e1;border-radius:6px;font-size:.9rem}
+.tx-list{max-height:180px;overflow-y:auto;list-style:none}.tx-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #f1f5f9;font-size:.85rem}
+.tx-delete{color:var(--expense);cursor:pointer;font-weight:bold;padding:0 8px}
+.install{display:none;background:#e0ecff;color:#1d4ed8;border:0;border-radius:8px;padding:9px 12px;font-weight:bold;margin:0 0 12px;width:100%}
+</style>
+</head>
+<body>
+<button class="install" id="installBtn">📱 Installer Mon Budget</button>
+<header>
+<button class="nav-btn" id="prev-month">&lt;</button><h2 id="month-display" style="font-size:1.1rem"></h2>
+<button class="nav-btn" id="next-month">&gt;</button>
+</header>
+<div class="summary-cards">
+<div class="card"><h3>Entrées</h3><div class="amount income" id="total-income">0.00 €</div></div>
+<div class="card"><h3>Dépenses</h3><div class="amount expense" id="total-expense">0.00 €</div></div>
+<div class="card"><h3>Solde</h3><div class="amount balance" id="total-balance">0.00 €</div></div>
+</div>
+<div class="calendar-days-header"><div>Lun</div><div>Mar</div><div>Mer</div><div>Jeu</div><div>Ven</div><div>Sam</div><div>Dim</div></div>
+<div class="calendar-grid" id="calendar-grid"></div>
+<div class="modal" id="day-modal"><div class="modal-content">
+<div class="modal-header"><h3 id="modal-date">Détails du jour</h3><button class="close-btn" id="close-modal">&times;</button></div>
+<form id="tx-form">
+<select id="tx-type"><option value="income">Entrée (+)</option><option value="expense">Dépense (-)</option></select>
+<input type="text" id="tx-desc" placeholder="Ex: Course, Salaire..." required>
+<input type="number" id="tx-amount" step="0.01" min="0" placeholder="Montant (€)" required>
+<button type="submit" class="nav-btn">Ajouter l'opération</button>
+</form>
+<ul class="tx-list" id="tx-list"></ul>
+</div></div>
+<script>
+let currentDate=new Date(),selectedDateStr="",transactions={};
+try{const saved=localStorage.getItem("budget_transactions");if(saved)transactions=JSON.parse(saved)}catch(e){}
+const $=id=>document.getElementById(id);
+const monthDisplay=$("month-display"),calendarGrid=$("calendar-grid"),totalIncomeEl=$("total-income"),totalExpenseEl=$("total-expense"),totalBalanceEl=$("total-balance"),modal=$("day-modal"),modalDate=$("modal-date"),txForm=$("tx-form"),txList=$("tx-list");
+const monthsFR=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+function saveTransactions(){try{localStorage.setItem("budget_transactions",JSON.stringify(transactions))}catch(e){}}
+function renderCalendar(){
+ const year=currentDate.getFullYear(),month=currentDate.getMonth();monthDisplay.textContent=`${monthsFR[month]} ${year}`;calendarGrid.innerHTML="";
+ const firstDay=new Date(year,month,1),lastDay=new Date(year,month+1,0);let startingDay=firstDay.getDay()-1;if(startingDay===-1)startingDay=6;
+ for(let i=0;i<startingDay;i++){const c=document.createElement("div");c.className="day-cell empty";calendarGrid.appendChild(c)}
+ let monthIncome=0,monthExpense=0;
+ for(let day=1;day<=lastDay.getDate();day++){
+  const dateStr=`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`,dayTxs=transactions[dateStr]||[];let dayInc=0,dayExp=0;
+  dayTxs.forEach(t=>t.type==="income"?dayInc+=Number(t.amount):dayExp+=Number(t.amount));monthIncome+=dayInc;monthExpense+=dayExp;
+  const cell=document.createElement("div");cell.className="day-cell";let s="";
+  if(dayInc>0)s+=`<span class="amount income">+${dayInc.toFixed(2)}</span>`;
+  if(dayExp>0)s+=`<span class="amount expense">-${dayExp.toFixed(2)}</span>`;
+  if(dayInc>0||dayExp>0){const net=dayInc-dayExp;s+=`<span class="day-net ${net>=0?"income":"expense"}">${net.toFixed(2)}</span>`}
+  cell.innerHTML=`<div class="day-number">${day}</div><div class="day-summary">${s}</div>`;cell.onclick=()=>openModal(dateStr);calendarGrid.appendChild(cell);
+ }
+ totalIncomeEl.textContent=`${monthIncome.toFixed(2)} €`;totalExpenseEl.textContent=`${monthExpense.toFixed(2)} €`;
+ const balance=monthIncome-monthExpense;totalBalanceEl.textContent=`${balance.toFixed(2)} €`;totalBalanceEl.className=`amount balance ${balance>=0?"income":"expense"}`;
+}
+function openModal(dateStr){selectedDateStr=dateStr;const [y,m,d]=dateStr.split("-");modalDate.textContent=`Jour : ${d}/${m}/${y}`;updateTxList();modal.style.display="flex"}
+function closeModal(){modal.style.display="none";renderCalendar()}
+function updateTxList(){
+ txList.innerHTML="";(transactions[selectedDateStr]||[]).forEach(t=>{const li=document.createElement("li");li.className="tx-item";const sign=t.type==="income"?"+":"-",cc=t.type==="income"?"income":"expense";
+ li.innerHTML=`<span>${escapeHtml(t.desc)}</span><div><span class="amount ${cc}">${sign}${Number(t.amount).toFixed(2)} €</span><span class="tx-delete" data-id="${t.id}">&times;</span></div>`;txList.appendChild(li)})
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+txList.onclick=e=>{const el=e.target.closest(".tx-delete");if(!el)return;const id=Number(el.dataset.id);transactions[selectedDateStr]=(transactions[selectedDateStr]||[]).filter(t=>t.id!==id);if(!transactions[selectedDateStr].length)delete transactions[selectedDateStr];saveTransactions();updateTxList();renderCalendar()}
+txForm.onsubmit=e=>{e.preventDefault();const type=$("tx-type").value,desc=$("tx-desc").value.trim(),amount=parseFloat($("tx-amount").value);if(!desc||!Number.isFinite(amount)||amount<0)return;if(!transactions[selectedDateStr])transactions[selectedDateStr]=[];transactions[selectedDateStr].push({id:Date.now(),type,desc,amount});saveTransactions();updateTxList();txForm.reset();renderCalendar()}
+$("prev-month").onclick=()=>{currentDate.setMonth(currentDate.getMonth()-1);renderCalendar()};$("next-month").onclick=()=>{currentDate.setMonth(currentDate.getMonth()+1);renderCalendar()};$("close-modal").onclick=closeModal;
+addEventListener("click",e=>{if(e.target===modal)closeModal()});renderCalendar();
+let deferredPrompt;const installBtn=$("installBtn");
+addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPrompt=e;installBtn.style.display="block"});
+installBtn.onclick=async()=>{if(!deferredPrompt)return;deferredPrompt.prompt();deferredPrompt=null;installBtn.style.display="none"};
+if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
+</script>
+</body>
+</html>
